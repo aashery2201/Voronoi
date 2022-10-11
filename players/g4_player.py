@@ -219,6 +219,63 @@ class Defender(Role):
     def deallocation_candidate(self, target_point):
         pass
 
+class Attacker(Role):
+    def _turn_moves(self, update, dead_units, target, line_formation):
+        ENEMY_INFLUENCE = -1
+        HOME_INFLUENCE = 20
+        ALLY_INFLUENCE = 0.0
+        WALL_INFLUENCE = 1
+        ATTACK_INFLUENCE = 30
+
+        moves = {}
+        own_units = update.own_units()
+        enemy_units = update.all_enemy_units()
+
+        for unit_id in self.units:
+            unit_pos = own_units[unit_id]
+
+            enemy_unit_forces = [
+                repelling_force(unit_pos, enemy_pos) for _, enemy_pos in enemy_units
+            ]
+            enemy_force = np.add.reduce(enemy_unit_forces)
+
+            ally_forces = [
+                repelling_force(unit_pos, ally_pos)
+                for ally_id, ally_pos in own_units.items()
+                if ally_id != unit_id
+            ]
+            ally_force = np.add.reduce(ally_forces)
+
+            home_force = repelling_force(unit_pos, self.params.home_base)
+
+            ux, uy = unit_pos
+            wall_normals = [
+                (ux, self.params.min_dim),
+                (ux, self.params.max_dim),
+                (self.params.min_dim, uy),
+                (self.params.max_dim, uy),
+            ]
+            wall_forces = [repelling_force(unit_pos, wall) for wall in wall_normals]
+            wall_force = np.add.reduce(wall_forces)
+
+            # TODO get attack_force
+            attack_forace = None
+            
+
+            total_force = normalize(
+                (enemy_force * ENEMY_INFLUENCE)
+                + (home_force * HOME_INFLUENCE)
+                + (ally_force * ALLY_INFLUENCE)
+                + (wall_force * WALL_INFLUENCE)
+                + (attack_forace) * ATTACK_INFLUENCE
+            )
+
+            moves[unit_id] = to_polar(total_force)
+
+        return moves
+
+    def deallocation_candidate(self, target_point):
+        pass
 
 class NaiveAttacker(Role):
     def _turn_moves(self, update, dead_units):
@@ -545,6 +602,7 @@ class Player:
 
         # Naive split allocation between attackers and defenders
         for uid in free_units:
+            '''
             total_defenders = sum(
                 len(defenders.units)
                 for defenders in self.role_groups[RoleType.DEFENDER]
@@ -557,6 +615,9 @@ class Player:
                 self.role_groups[RoleType.ATTACKER][0].allocate_unit(uid)
             else:
                 self.role_groups[RoleType.DEFENDER][0].allocate_unit(uid)
+            '''
+            # All unit are attacker for testing purposes
+            self.role_groups[RoleType.ATTACKER][0].allocate_unit(uid)
 
         moves: list[tuple[float, float]] = []
         role_moves = {}
