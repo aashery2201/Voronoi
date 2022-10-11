@@ -81,7 +81,7 @@ def force_vec(p1, p2):
     """Vector direction and magnitude pointing from `p2` to `p1`"""
     v = p1 - p2
     mag = np.linalg.norm(v)
-    unit = v / mag
+    unit = v / (mag + EPSILON)
     return unit, mag
 
 
@@ -220,7 +220,8 @@ class Defender(Role):
         pass
 
 class Attacker(Role):
-    def _turn_moves(self, update, dead_units, target, line_formation):
+    def _turn_moves(self, update, dead_units):
+        #pdb.set_trace()
         ENEMY_INFLUENCE = -1
         HOME_INFLUENCE = 20
         ALLY_INFLUENCE = 0.0
@@ -230,7 +231,6 @@ class Attacker(Role):
         moves = {}
         own_units = update.own_units()
         enemy_units = update.all_enemy_units()
-
         for unit_id in self.units:
             unit_pos = own_units[unit_id]
 
@@ -258,22 +258,94 @@ class Attacker(Role):
             wall_forces = [repelling_force(unit_pos, wall) for wall in wall_normals]
             wall_force = np.add.reduce(wall_forces)
 
-            # TODO get attack_force
-            attack_forace = None
-            
-
-            total_force = normalize(
+            total_force = (
                 (enemy_force * ENEMY_INFLUENCE)
                 + (home_force * HOME_INFLUENCE)
                 + (ally_force * ALLY_INFLUENCE)
                 + (wall_force * WALL_INFLUENCE)
-                + (attack_forace) * ATTACK_INFLUENCE
             )
-
-            moves[unit_id] = to_polar(total_force)
-
+            moves[unit_id] = total_force
+            
+        # TODO get attack_force
+        target = [75, 25]
+        attack_force = self.attack_point(own_units, target, True)
+        #pdb.set_trace()
+        for unit_id in self.units:
+            moves[unit_id] = to_polar(normalize(moves[unit_id] + ATTACK_INFLUENCE * attack_force[unit_id][0]))
         return moves
+    
+    def attack_point(self, units, target, homebase_mode=True):
+        """Given a list of unit, attack the target point in a line formation.
+        Args:
+            units: attack units
+            target: attack target
+            homebase_mode: attack from homebase
+        Return:
+            a list of attack move using units for the target.
+        """
+        def get_centroid(units):
+            """
+            Find centroid on a cluster of points
+            """
+            return units.mean(axis=0)
 
+        def find_closest_point(line, point):
+            """
+            Find closest point on line segment given a point
+            """
+            return nearest_points(line, point)[0]
+
+        def compute_attack_vector(units, closest_point, target_point):
+            """Given units, their corresponding cloest point in the attack line, and a target
+            Compute unit vector to attack target in a straight line formation
+
+            Args:
+                units: attack units
+                cloest_point: point in line formation thats cloest to units (1 to 1 mapping)
+                target_point: where to attack
+
+            Return:
+                list of attack move in unit vector form for each units
+            """
+            attack_move = []
+            for i in range(len(units)):
+                unit_vec_closest, mag_closest = force_vec(
+                    units[i], closest_point[i].coords
+                )
+                unit_vec_target, mag_target = force_vec(units[i], target_point)
+                # Calculate weight for cloest point and target point
+                total_mag = mag_target + mag_closest + EPSILON
+                weight_target = mag_target / total_mag
+                weight_closest = mag_closest / total_mag
+                # Calculate move vec for each units
+                attack_vec = (
+                    unit_vec_closest * weight_closest + unit_vec_target * weight_target
+                )
+                attack_vec = attack_vec / np.linalg.norm(attack_vec + EPSILON)
+                attack_vec *= -1
+                attack_move.append(attack_vec)
+            return attack_move
+        units_id = [k for k, v in units.items()]
+        units = np.stack([v for k, v in units.items()])
+        if homebase_mode:  # attack from homebase
+            start_point = self.params.spawn_point
+        else:
+            start_point = get_centroid(units)
+        line = LineString([start_point, target])
+        cloest_points = []
+        for i in units:
+            closest_pt_to_line = find_closest_point(line, Point(i))
+            cloest_points.append(closest_pt_to_line)
+        #pdb.set_trace()
+        attack_vec = compute_attack_vector(units, cloest_points, target)
+        output = {}
+        for idx, i in enumerate(units_id):
+            output[i] = attack_vec[idx]
+        return output
+
+    def split_units():
+        pass
+    
     def deallocation_candidate(self, target_point):
         pass
 
@@ -377,9 +449,7 @@ class Player:
 
         self.role_groups: dict[RoleType, list[Role]] = {role: [] for role in RoleType}
         self.role_groups[RoleType.DEFENDER].append(Defender(self.logger, self.params))
-        self.role_groups[RoleType.ATTACKER].append(
-            NaiveAttacker(self.logger, self.params)
-        )
+        self.role_groups[RoleType.ATTACKER].append(Attacker(self.logger, self.params))
 
     def gather_point(self, units, targets):
         move = []
@@ -391,7 +461,7 @@ class Player:
             move.debug("Move force:", move)
         move_vec = [self.to_polar((x[0][0], x[0][1])) for x in move]
         return move_vec
-
+    '''
     def attack_point(self, units, target, homebase_mode=True):
         """Given a list of unit, attack the target point in a line formation.
 
@@ -503,7 +573,8 @@ class Player:
         Given an enemy player index, return the unit location of enemy player i.
         """
         return unit_pos[enemy_idx]
-
+    '''
+    
     def debug(self, *args):
         self.logger.info(" ".join(str(a) for a in args))
 
