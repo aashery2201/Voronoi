@@ -1,4 +1,5 @@
 import numpy as np
+import random
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points
 import logging
@@ -220,17 +221,35 @@ class Defender(Role):
         pass
 
 class Attacker(Role):
+    def __init__(self, logger, params):
+        super().__init__(logger, params)
+        self.noise = dict()
+        
+    def get_centroid(self, units):
+            """
+            Find centroid on a cluster of points
+            """
+            return units.mean(axis=0)
+
+    def find_closest_point(self, line, point):
+        """
+        Find closest point on line segment given a point
+        """
+        return nearest_points(line, point)[0]
+        
     def _turn_moves(self, update, dead_units):
-        #pdb.set_trace()
         ENEMY_INFLUENCE = -1
         HOME_INFLUENCE = 20
         ALLY_INFLUENCE = 0.0
         WALL_INFLUENCE = 1
-        ATTACK_INFLUENCE = 30
+        ATTACK_INFLUENCE = 15
+        NOISE_INFLUENCE = 0.5
+        AVOID_INFLUENCE = 100
 
         moves = {}
         own_units = update.own_units()
-        enemy_units = update.all_enemy_units()
+        #enemy_units = update.all_enemy_units()
+        '''
         for unit_id in self.units:
             unit_pos = own_units[unit_id]
 
@@ -265,86 +284,86 @@ class Attacker(Role):
                 + (wall_force * WALL_INFLUENCE)
             )
             moves[unit_id] = total_force
-            
+        '''
         # TODO get attack_force
-        target = [75, 25]
-        attack_force = self.attack_point(own_units, target, True)
-        #pdb.set_trace()
-        for unit_id in self.units:
-            moves[unit_id] = to_polar(normalize(moves[unit_id] + ATTACK_INFLUENCE * attack_force[unit_id][0]))
-        return moves
-    
-    def attack_point(self, units, target, homebase_mode=True):
-        """Given a list of unit, attack the target point in a line formation.
-        Args:
-            units: attack units
-            target: attack target
-            homebase_mode: attack from homebase
-        Return:
-            a list of attack move using units for the target.
-        """
-        def get_centroid(units):
-            """
-            Find centroid on a cluster of points
-            """
-            return units.mean(axis=0)
-
-        def find_closest_point(line, point):
-            """
-            Find closest point on line segment given a point
-            """
-            return nearest_points(line, point)[0]
-
-        def compute_attack_vector(units, closest_point, target_point):
-            """Given units, their corresponding cloest point in the attack line, and a target
-            Compute unit vector to attack target in a straight line formation
-
-            Args:
-                units: attack units
-                cloest_point: point in line formation thats cloest to units (1 to 1 mapping)
-                target_point: where to attack
-
-            Return:
-                list of attack move in unit vector form for each units
-            """
-            attack_move = []
-            for i in range(len(units)):
-                unit_vec_closest, mag_closest = force_vec(
-                    units[i], closest_point[i].coords
-                )
-                unit_vec_target, mag_target = force_vec(units[i], target_point)
-                # Calculate weight for cloest point and target point
-                total_mag = mag_target + mag_closest + EPSILON
-                weight_target = mag_target / total_mag
-                weight_closest = mag_closest / total_mag
-                # Calculate move vec for each units
-                attack_vec = (
-                    unit_vec_closest * weight_closest + unit_vec_target * weight_target
-                )
-                attack_vec = attack_vec / np.linalg.norm(attack_vec + EPSILON)
-                attack_vec *= -1
-                attack_move.append(attack_vec)
-            return attack_move
-        units_id = [k for k, v in units.items()]
-        units = np.stack([v for k, v in units.items()])
+        homebase_mode = True
+        # get where to initiate the attack
+        units_array = np.stack([v for k, v in own_units.items()])
         if homebase_mode:  # attack from homebase
             start_point = self.params.spawn_point
         else:
-            start_point = get_centroid(units)
-        line = LineString([start_point, target])
-        cloest_points = []
-        for i in units:
-            closest_pt_to_line = find_closest_point(line, Point(i))
-            cloest_points.append(closest_pt_to_line)
+            start_point = self.get_centroid(units_array)
+        # get attack target and get formation
+        avoid, target = self.find_target_simple()
+        formation = LineString([start_point, target])
         #pdb.set_trace()
-        attack_vec = compute_attack_vector(units, cloest_points, target)
-        output = {}
-        for idx, i in enumerate(units_id):
-            output[i] = attack_vec[idx]
-        return output
+        # calcualte force
+        for unit_id in self.units:
+            unit_pos = own_units[unit_id]
+            closest_pt_on_formation = self.find_closest_point(formation, Point(unit_pos))
+            
+            attack_force = self.attack_point(unit_pos, target, closest_pt_on_formation)
 
-    def split_units():
-        pass
+            attack_repulsion_force = repelling_force(unit_pos, avoid)
+
+            if unit_id not in self.noise:
+                noise_force = self.noise_force(attack_force)
+                self.noise[unit_id] = noise_force
+            
+            #pdb.set_trace()
+            dist_to_avoid = np.linalg.norm(avoid - unit_pos)
+            noise_influence = 1/dist_to_avoid * 10
+            
+            total_force = normalize(attack_repulsion_force * AVOID_INFLUENCE + ATTACK_INFLUENCE * attack_force + noise_influence * self.noise[unit_id])
+            
+            
+            moves[unit_id] = to_polar(total_force)
+        return moves
+
+    def find_target_simple(self):
+        # find a target to attack
+        # return 2 points, point A is where the enemy is
+        # point B is where we wanna go
+        # point A create a strong repulsive force
+        # Point B create a strong attracking force
+        # In hope that when going toward point B, our attack would "circle around" point A
+        
+        return [50, 25], [60, 30]
+    
+    def noise_force(self, attack_force):
+        # generate noise force roughly in the same direction as attack force
+        #pdb.set_trace()
+        r = random.randint(0, 100)
+        vec_perpendicular = attack_force.copy()
+        if r > 50:
+            vec_perpendicular[0] *= -1
+        else:
+            vec_perpendicular[1] *= -1
+        return vec_perpendicular
+    
+    
+    def attack_point(self, unit, target, closest_point):
+        """Given a unit, attack the target point following the foramtion.
+        Args:
+            units: attack unit
+            target: attack target
+            cloest_points: cloest point a unit is from its formation
+        Return:
+            attack vector following the formation
+        """
+        unit_vec_closest, mag_closest = force_vec(
+            unit, closest_point.coords
+        )
+        unit_vec_target, mag_target = force_vec(unit, target)
+        # Calculate weight for cloest point and target point
+        total_mag = mag_target + mag_closest + EPSILON
+        weight_target = mag_target / total_mag
+        weight_closest = mag_closest / total_mag
+        # Calculate move vec for each units
+        attack_vec = unit_vec_closest * weight_closest + unit_vec_target * weight_target
+        attack_vec = attack_vec
+        attack_vec *= -1
+        return attack_vec[0]
     
     def deallocation_candidate(self, target_point):
         pass
