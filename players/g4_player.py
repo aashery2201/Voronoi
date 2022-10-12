@@ -242,13 +242,13 @@ class Attacker(Role):
         HOME_INFLUENCE = 20
         ALLY_INFLUENCE = 0.0
         WALL_INFLUENCE = 1
-        ATTACK_INFLUENCE = 15
+        ATTACK_INFLUENCE = 100
         NOISE_INFLUENCE = 0.5
-        AVOID_INFLUENCE = 100
+        AVOID_INFLUENCE = 300
 
         moves = {}
         own_units = update.own_units()
-        #enemy_units = update.all_enemy_units()
+        enemy_units = update.all_enemy_units()
         '''
         for unit_id in self.units:
             unit_pos = own_units[unit_id]
@@ -294,7 +294,8 @@ class Attacker(Role):
         else:
             start_point = self.get_centroid(units_array)
         # get attack target and get formation
-        avoid, target = self.find_target_simple()
+        avoid, target = self.find_target_simple(start_point, enemy_units)
+        #pdb.set_trace()
         formation = LineString([start_point, target])
         #pdb.set_trace()
         # calcualte force
@@ -316,19 +317,25 @@ class Attacker(Role):
             
             total_force = normalize(attack_repulsion_force * AVOID_INFLUENCE + ATTACK_INFLUENCE * attack_force + noise_influence * self.noise[unit_id])
             
-            
             moves[unit_id] = to_polar(total_force)
         return moves
 
-    def find_target_simple(self):
+    def find_target_simple(self, start_point, enemy_units):
         # find a target to attack
         # return 2 points, point A is where the enemy is
         # point B is where we wanna go
         # point A create a strong repulsive force
         # Point B create a strong attracking force
         # In hope that when going toward point B, our attack would "circle around" point A
-        
-        return [50, 25], [60, 30]
+        # For now, just find a, and use heuristic(fix distance) for b
+        # find the closest point to our base
+        dist_to_home = []
+        for _, enemy_pos in enemy_units:
+            dist_to_home.append(np.linalg.norm(self.params.home_base-enemy_pos).item())
+        target_idx = np.argmin(np.array(dist_to_home))
+        target_pos = enemy_units[target_idx][1]
+        unit_vec, _ = force_vec(start_point, target_pos)
+        return target_pos, target_pos - unit_vec * 10
     
     def noise_force(self, attack_force):
         # generate noise force roughly in the same direction as attack force
