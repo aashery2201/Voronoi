@@ -95,6 +95,7 @@ with open("games.csv") as f:
         games.append(dict(zip(header, row)))
 
 matchups = np.zeros((8, 8), dtype=int)
+matchup_scores = np.zeros((8, 8), dtype=int)
 for game in games:
     if int(game["Total Day"]) < 1000:
         continue
@@ -108,33 +109,43 @@ for game in games:
     s3 = int(game["Player 3 Final Score"])
     s4 = int(game["Player 4 Final Score"])
 
-    ranked = [
-        group
-        for group, _ in sorted(
-            [(p1, s1), (p2, s2), (p3, s3), (p4, s4)], key=lambda t: t[1], reverse=True
-        )
-    ]
+    ranked = sorted(
+        [(p1, s1), (p2, s2), (p3, s3), (p4, s4)], key=lambda t: t[1], reverse=True
+    )
     for ai in range(3):
-        above_group = ranked[ai] - 1
+        above_group, above_score = ranked[ai]
+        above_group -= 1
         for bi in range(ai + 1, 4):
-            below_group = ranked[bi] - 1
+            below_group, below_score = ranked[bi]
+            below_group -= 1
+
             matchups[above_group][below_group] += 1
-matchup_ratios = np.zeros((8, 8), dtype=float)
+
+            matchup_scores[above_group][below_group] += above_score
+            matchup_scores[below_group][above_group] += below_score
+
+matchup_win_ratios = np.zeros((8, 8), dtype=float)
 for a in range(8):
     for b in range(8):
         total_games = matchups[a][b] + matchups[b][a]
         if a == b:
-            matchup_ratios[a][b] = 0
+            matchup_win_ratios[a][b] = None
         elif total_games == 0:
-            matchup_ratios[a][b] = 0
+            matchup_win_ratios[a][b] = 0
         else:
-            matchup_ratios[a][b] = matchups[a][b] / total_games
+            matchup_win_ratios[a][b] = matchups[a][b] / total_games
+# Matchup win ratios
 plt.clf()
-plt.imshow(matchup_ratios)
+plt.imshow(matchup_win_ratios)
 for a in range(8):
     for b in range(8):
         text = plt.gca().text(
-            b, a, round(matchup_ratios[a][b], 2), ha="center", va="center", color="w"
+            b,
+            a,
+            round(matchup_win_ratios[a][b], 2),
+            ha="center",
+            va="center",
+            color="w",
         )
 group_ticks = np.arange(8)
 group_labels = [f"G{n + 1}" for n in range(8)]
@@ -143,4 +154,39 @@ plt.gca().set_yticks(group_ticks, group_labels)
 plt.gca().set_title("Matchup Win Rates")
 plt.xlabel("Loses")
 plt.ylabel("Wins")
-plt.savefig("plots/matchups.png", dpi=300)
+plt.savefig("plots/matchup_wins.png", dpi=300)
+
+# Matchup score ratios
+matchup_score_ratios = np.zeros((8, 8), dtype=float)
+for a in range(8):
+    for b in range(8):
+        if a == b:
+            matchup_scores[a][b] = 0
+        a_score = matchup_scores[a][b]
+        b_score = matchup_scores[b][a]
+        matchup_score_ratios[a][b] = (
+            (a_score / b_score) - 1
+            if a_score > b_score
+            else (-1 * (b_score / a_score)) + 1
+        )
+plt.clf()
+plt.imshow(matchup_score_ratios, vmin=-1, vmax=1)
+for a in range(8):
+    for b in range(8):
+        text = plt.gca().text(
+            b,
+            a,
+            # round(matchup_score_ratios[a][b], 2),
+            round(matchup_scores[a][b] / matchup_scores[b][a], 2),
+            ha="center",
+            va="center",
+            color="w",
+        )
+group_ticks = np.arange(8)
+group_labels = [f"G{n + 1}" for n in range(8)]
+plt.gca().set_xticks(group_ticks, group_labels)
+plt.gca().set_yticks(group_ticks, group_labels)
+plt.gca().set_title("Matchup Score Ratios")
+plt.xlabel("Loses")
+plt.ylabel("Wins")
+plt.savefig("plots/matchup_scores.png", dpi=300)
