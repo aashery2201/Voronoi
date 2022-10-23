@@ -86,3 +86,61 @@ for n in NS:
     plt.gca().set_xticks(x, LENGTHS)
     plt.gca().legend()
     plt.savefig(f"plots/scaled/{n}.png", dpi=300)
+
+with open("games.csv") as f:
+    reader = csv.reader(f)
+    header = next(reader)
+    games = []
+    for row in reader:
+        games.append(dict(zip(header, row)))
+
+matchups = np.zeros((8, 8), dtype=int)
+for game in games:
+    if int(game["Total Day"]) < 1000:
+        continue
+
+    p1 = int(game["Player 1"])
+    p2 = int(game["Player 2"])
+    p3 = int(game["Player 3"])
+    p4 = int(game["Player 4"])
+    s1 = int(game["Player 1 Final Score"])
+    s2 = int(game["Player 2 Final Score"])
+    s3 = int(game["Player 3 Final Score"])
+    s4 = int(game["Player 4 Final Score"])
+
+    ranked = [
+        group
+        for group, _ in sorted(
+            [(p1, s1), (p2, s2), (p3, s3), (p4, s4)], key=lambda t: t[1], reverse=True
+        )
+    ]
+    for ai in range(3):
+        above_group = ranked[ai] - 1
+        for bi in range(ai + 1, 4):
+            below_group = ranked[bi] - 1
+            matchups[above_group][below_group] += 1
+matchup_ratios = np.zeros((8, 8), dtype=float)
+for a in range(8):
+    for b in range(8):
+        total_games = matchups[a][b] + matchups[b][a]
+        if a == b:
+            matchup_ratios[a][b] = 0
+        elif total_games == 0:
+            matchup_ratios[a][b] = 0
+        else:
+            matchup_ratios[a][b] = matchups[a][b] / total_games
+plt.clf()
+plt.imshow(matchup_ratios)
+for a in range(8):
+    for b in range(8):
+        text = plt.gca().text(
+            b, a, round(matchup_ratios[a][b], 2), ha="center", va="center", color="w"
+        )
+group_ticks = np.arange(8)
+group_labels = [f"G{n + 1}" for n in range(8)]
+plt.gca().set_xticks(group_ticks, group_labels)
+plt.gca().set_yticks(group_ticks, group_labels)
+plt.gca().set_title("Matchup Win Rates")
+plt.xlabel("Loses")
+plt.ylabel("Wins")
+plt.savefig("plots/matchups.png", dpi=300)
